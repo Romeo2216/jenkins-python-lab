@@ -10,7 +10,8 @@ pipeline {
     }
 
     environment {
-        IMAGE_NAME = 'jenkins-python-lab'
+        IMAGE_NAME = 'romeo2296/jenkinslab'
+        DOCKERHUB_CREDENTIALS_ID = 'dockerhub-credentials'
         CONTAINER_NAME = 'python-lab-app'
     }
 
@@ -91,6 +92,27 @@ else:
     raise SystemExit("Health check failed!")
 PY
                 '''
+            }
+        }
+
+        stage('Publish') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: env.DOCKERHUB_CREDENTIALS_ID,
+                    usernameVariable: 'DOCKERHUB_USERNAME',
+                    passwordVariable: 'DOCKERHUB_TOKEN'
+                )]) {
+                    sh '''
+                        trap 'docker logout >/dev/null 2>&1 || true' EXIT
+
+                        printf '%s' "$DOCKERHUB_TOKEN" | docker login \
+                            --username "$DOCKERHUB_USERNAME" \
+                            --password-stdin
+
+                        docker push ${IMAGE_NAME}:${BUILD_NUMBER}
+                        docker push ${IMAGE_NAME}:latest
+                    '''
+                }
             }
         }
 
