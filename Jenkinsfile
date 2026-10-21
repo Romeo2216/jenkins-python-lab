@@ -9,27 +9,16 @@ pipeline {
         disableConcurrentBuilds()
     }
 
+    environment {
+        IMAGE_NAME = 'jenkins-python-lab'
+        CONTAINER_NAME = 'python-lab-app'
+    }
+
     stages {
 
         stage('Checkout') {
             steps {
-                echo 'Checking out source code...'
                 checkout scm
-            }
-        }
-
-        stage('Environment') {
-            steps {
-                sh '''
-                    echo "=== AGENT ==="
-                    echo "$NODE_NAME"
-
-                    echo "=== PYTHON ==="
-                    python3 --version
-
-                    echo "=== WORKSPACE ==="
-                    pwd
-                '''
             }
         }
 
@@ -37,7 +26,6 @@ pipeline {
             steps {
                 sh '''
                     python3 -m venv .venv
-
                     .venv/bin/python -m pip install -r requirements.txt
                 '''
             }
@@ -55,15 +43,53 @@ pipeline {
             }
         }
 
-        stage('Package') {
+        stage('Docker Build') {
             steps {
                 sh '''
-                    mkdir -p dist
+                    docker build \
+                        -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                        -t ${IMAGE_NAME}:latest \
+                        .
+                '''
+            }
+        }
 
-                    tar \
-                        --exclude='__pycache__' \
-                        -czf dist/application.tar.gz \
-                        app/
+        stage('Deploy') {
+            steps {
+                sh '''
+                    docker rm -f ${CONTAINER_NAME} 2>/dev/null || true
+
+                    docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        --restart unless-stopped \
+                        -p 8000:8000 \
+                        ${IMAGE_NAME}:${BUILD_NUMBER}
+                '''
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                sh '''
+                    .venv/bin/python - <<'PY'
+import time
+import urllib.request
+
+url = "http://docker-dind:8000/health"
+
+for attempt in range(1, 16):
+    try:
+        with urllib.request.urlopen(url, timeout=3) as response:
+            if response.status == 200:
+                print("Application is healthy!")
+                break
+    except Exception as error:
+        print(f"Attempt {attempt}: {error}")
+
+    time.sleep(2)
+else:
+    raise SystemExit("Health check failed!")
+PY
                 '''
             }
         }
@@ -74,20 +100,14 @@ pipeline {
         always {
             junit testResults: 'reports/results.xml',
                   allowEmptyResults: true
-
-            archiveArtifacts artifacts: 'dist/*.tar.gz',
-                             allowEmptyArchive: true,
-                             fingerprint: true
-
-            echo 'Pipeline finished.'
         }
 
         success {
-            echo 'All tests passed!'
+            echo 'CI/CD pipeline completed successfully!'
         }
 
         failure {
-            echo 'Pipeline failed!'
+            echo 'CI/CD pipeline failed!'
         }
     }
 }
