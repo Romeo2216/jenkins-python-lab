@@ -94,7 +94,7 @@ PY
             }
         }
 
-        Stage('Cleanup') {
+        stage('Cleanup') {
             steps {
                 sh '''
                     docker stop ${CONTAINER_NAME} || true
