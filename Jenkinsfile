@@ -93,6 +93,20 @@ PY
                 '''
             }
         }
+
+        Stage('Cleanup') {
+            steps {
+                sh '''
+                    docker stop ${CONTAINER_NAME} || true
+                    docker rm ${CONTAINER_NAME} || true
+                    docker rmi ${IMAGE_NAME}:${BUILD_NUMBER} || true
+                    docker rmi ${IMAGE_NAME}:latest || true
+                    docker system prune -f
+                    docker volume prune -f
+                    docker network prune -f
+                '''
+            }
+        }
     }
 
     post {
