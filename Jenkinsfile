@@ -143,6 +143,94 @@ PY
                 }
             }
         }
+
+        stage('Update GitOps') {
+            steps {
+                dir('gitops') {
+
+                    // Récupérer le dépôt GitOps
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: '*/main']],
+                        userRemoteConfigs: [[
+                            url: 'https://github.com/romeo2216/jenkinslab-gitops.git',
+                            credentialsId: 'github-gitops-credentials'
+                        ]]
+                    ])
+
+                    // Modifier le tag et publier le commit
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'github-gitops-credentials',
+                            usernameVariable: 'GITOPS_USERNAME',
+                            passwordVariable: 'GITOPS_TOKEN'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+
+                            : "${IMAGE_TAG:?Missing image tag}"
+
+                            echo "Updating GitOps to image: ${IMAGE_NAME}:${IMAGE_TAG}"
+
+                            # Sécuriser la valeur utilisée dans le YAML
+                            printf '%s' "$IMAGE_TAG" |
+                                grep -Eq '^[0-9a-f]{12}$'
+
+                            FILE="environments/dev/kustomization.yaml"
+
+                            test -f "$FILE"
+
+                            # Vérifier qu'une seule entrée newTag existe
+                            COUNT=$(grep -Ec '^[[:space:]]*newTag:' "$FILE")
+                            test "$COUNT" -eq 1
+
+                            # Mettre à jour le tag
+                            sed -i -E \
+                                "s/^([[:space:]]*newTag:).*/\\\\1 \\"${IMAGE_TAG}\\"/" \
+                                "$FILE"
+
+                            # Préparer le commit
+                            git config user.name "Jenkins CI"
+                            git config user.email "jenkins@localhost"
+
+                            git add "$FILE"
+
+                            # Éviter les commits inutiles
+                            if git diff --cached --quiet; then
+                                echo "GitOps already uses this image."
+                                exit 0
+                            fi
+
+                            git commit -m "ci: deploy ${IMAGE_TAG} to dev"
+
+                            # Authentification Git sans token dans l'URL
+                            ASKPASS=$(mktemp)
+                            chmod 700 "$ASKPASS"
+
+                            trap 'rm -f "$ASKPASS"' EXIT
+
+                            cat > "$ASKPASS" <<'EOF'
+        #!/bin/sh
+        case "$1" in
+        *Username*) printf '%s\\n' "$GITOPS_USERNAME" ;;
+        *Password*) printf '%s\\n' "$GITOPS_TOKEN" ;;
+        *) exit 1 ;;
+        esac
+        EOF
+
+                            export GIT_ASKPASS="$ASKPASS"
+                            export GIT_TERMINAL_PROMPT=0
+
+                            git -c credential.helper= push origin HEAD:main
+
+                            echo "GitOps repository updated."
+                        '''
+                    }
+                }
+            }
+        }
     }
 
     post {
