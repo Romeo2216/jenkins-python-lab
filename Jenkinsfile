@@ -7,12 +7,14 @@ pipeline {
     options {
         timestamps()
         disableConcurrentBuilds()
+        skipDefaultCheckout(true)
     }
 
     environment {
         IMAGE_NAME = 'romeo2296/jenkinslab'
         DOCKERHUB_CREDENTIALS_ID = 'dockerhub-credentials'
-        CONTAINER_NAME = 'python-lab-app'
+        IMAGE_TAG = ''
+        SMOKE_CONTAINER = ''
     }
 
     stages {
@@ -20,21 +22,28 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+
+                script {
+                    env.IMAGE_TAG = sh(
+                        script: 'git rev-parse --short=12 HEAD',
+                        returnStdout: true
+                    ).trim()
+
+                    env.SMOKE_CONTAINER = "jenkins-smoke-${env.BUILD_NUMBER}"
+
+                    echo "Commit: ${env.IMAGE_TAG}"
+                }
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Unit Tests') {
             steps {
                 sh '''
                     python3 -m venv .venv
-                    .venv/bin/python -m pip install -r requirements.txt
-                '''
-            }
-        }
 
-        stage('Tests') {
-            steps {
-                sh '''
+                    .venv/bin/python -m pip install \
+                        -r requirements.txt
+
                     mkdir -p reports
 
                     .venv/bin/python -m pytest \
@@ -47,49 +56,57 @@ pipeline {
         stage('Docker Build') {
             steps {
                 sh '''
-                    docker build \
-                        -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                    docker buildx build \
+                        --load \
+                        --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+                        -t ${IMAGE_NAME}:${IMAGE_TAG} \
                         -t ${IMAGE_NAME}:latest \
                         .
                 '''
             }
         }
 
-        stage('Run') {
+        stage('Smoke Test') {
             steps {
                 sh '''
-                    docker rm -f ${CONTAINER_NAME} 2>/dev/null || true
-
                     docker run -d \
-                        --name ${CONTAINER_NAME} \
-                        --restart unless-stopped \
-                        -p 8000:8000 \
-                        ${IMAGE_NAME}:${BUILD_NUMBER}
-                '''
-            }
-        }
+                        --name "${SMOKE_CONTAINER}" \
+                        "${IMAGE_NAME}:${IMAGE_TAG}"
 
-        stage('Health Check') {
-            steps {
-                sh '''
-                    .venv/bin/python - <<'PY'
+                    python3 - <<'PY'
+                    import os
+                    import subprocess
                     import time
-                    import urllib.request
 
-                    url = "http://docker-dind:8000/health"
+                    container = os.environ["SMOKE_CONTAINER"]
 
                     for attempt in range(1, 16):
-                        try:
-                            with urllib.request.urlopen(url, timeout=3) as response:
-                                if response.status == 200:
-                                    print("Application is healthy!")
-                                    break
-                        except Exception as error:
-                            print(f"Attempt {attempt}: {error}")
+                        result = subprocess.run(
+                            [
+                                "docker", "exec", container,
+                                "python", "-c",
+                                (
+                                    "import urllib.request; "
+                                    "r = urllib.request.urlopen("
+                                    "'http://127.0.0.1:8000/health', timeout=3); "
+                                    "assert r.status == 200"
+                                )
+                            ],
+                            capture_output=True,
+                            text=True
+                        )
 
+                        if result.returncode == 0:
+                            print("Smoke test passed!", flush=True)
+                            break
+
+                        print(
+                            f"Attempt {attempt}: {result.stderr.strip()}",
+                            flush=True
+                        )
                         time.sleep(2)
                     else:
-                        raise SystemExit("Health check failed!")
+                        raise SystemExit("Smoke test failed!")
                     PY
                 '''
             }
@@ -97,33 +114,31 @@ pipeline {
 
         stage('Publish') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: env.DOCKERHUB_CREDENTIALS_ID,
-                    usernameVariable: 'DOCKERHUB_USERNAME',
-                    passwordVariable: 'DOCKERHUB_TOKEN'
-                )]) {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: env.DOCKERHUB_CREDENTIALS_ID,
+                        usernameVariable: 'DOCKERHUB_USERNAME',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
                     sh '''
-                        trap 'docker logout >/dev/null 2>&1 || true' EXIT
+                        set -eu
 
-                        printf '%s' "$DOCKERHUB_TOKEN" | docker login \
-                            --username "$DOCKERHUB_USERNAME" \
-                            --password-stdin
+                        export DOCKER_CONFIG="$WORKSPACE/.docker"
+                        mkdir -p "$DOCKER_CONFIG"
+                        chmod 700 "$DOCKER_CONFIG"
 
-                        docker push ${IMAGE_NAME}:${BUILD_NUMBER}
-                        docker push ${IMAGE_NAME}:latest
+                        printf '%s' "$DOCKERHUB_TOKEN" |
+                            docker login \
+                                --username "$DOCKERHUB_USERNAME" \
+                                --password-stdin
+
+                        docker push "${IMAGE_NAME}:${IMAGE_TAG}"
+                        docker push "${IMAGE_NAME}:latest"
+
+                        docker logout
                     '''
                 }
-            }
-        }
-
-        stage('Cleanup') {
-            steps {
-                sh '''
-                    docker stop ${CONTAINER_NAME} || true
-                    docker rm ${CONTAINER_NAME} || true
-                    docker rmi ${IMAGE_NAME}:${BUILD_NUMBER} || true
-                    docker rmi ${IMAGE_NAME}:latest || true
-                '''
             }
         }
     }
@@ -133,14 +148,31 @@ pipeline {
         always {
             junit testResults: 'reports/results.xml',
                   allowEmptyResults: true
+
+            echo 'Cleaning temporary resources...'
+
+            sh '''
+                docker rm -f "${SMOKE_CONTAINER}" \
+                    2>/dev/null || true
+
+                if [ -n "${IMAGE_TAG}" ]; then
+                    docker rmi "${IMAGE_NAME}:${IMAGE_TAG}" \
+                        2>/dev/null || true
+
+                    docker rmi "${IMAGE_NAME}:latest" \
+                        2>/dev/null || true
+                fi
+
+                rm -rf "$WORKSPACE/.docker"
+            '''
         }
 
         success {
-            echo 'CI/CD pipeline completed successfully!'
+            echo "Image published: ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
         }
 
         failure {
-            echo 'CI/CD pipeline failed!'
+            echo 'CI pipeline failed!'
         }
     }
 }
