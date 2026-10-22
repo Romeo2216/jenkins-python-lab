@@ -13,8 +13,6 @@ pipeline {
     environment {
         IMAGE_NAME = 'romeo2296/jenkinslab'
         DOCKERHUB_CREDENTIALS_ID = 'dockerhub-credentials'
-        IMAGE_TAG = ''
-        SMOKE_CONTAINER = ''
     }
 
     stages {
@@ -56,11 +54,15 @@ pipeline {
         stage('Docker Build') {
             steps {
                 sh '''
+                    set -eu
+
+                    : "${IMAGE_TAG:?IMAGE_TAG is empty}"
+
                     docker buildx build \
                         --load \
                         --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
-                        -t ${IMAGE_NAME}:${IMAGE_TAG} \
-                        -t ${IMAGE_NAME}:latest \
+                        -t "${IMAGE_NAME}:${IMAGE_TAG}" \
+                        -t "${IMAGE_NAME}:latest" \
                         .
                 '''
             }
