@@ -76,40 +76,40 @@ pipeline {
                         "${IMAGE_NAME}:${IMAGE_TAG}"
 
                     python3 - <<'PY'
-                        import os
-                        import subprocess
-                        import time
+import os
+import subprocess
+import time
 
-                        container = os.environ["SMOKE_CONTAINER"]
+container = os.environ["SMOKE_CONTAINER"]
 
-                        for attempt in range(1, 16):
-                            result = subprocess.run(
-                                [
-                                    "docker", "exec", container,
-                                    "python", "-c",
-                                    (
-                                        "import urllib.request; "
-                                        "r = urllib.request.urlopen("
-                                        "'http://127.0.0.1:8000/health', timeout=3); "
-                                        "assert r.status == 200"
-                                    )
-                                ],
-                                capture_output=True,
-                                text=True
-                            )
+for attempt in range(1, 16):
+    result = subprocess.run(
+        [
+            "docker", "exec", container,
+            "python", "-c",
+            (
+                "import urllib.request; "
+                "r = urllib.request.urlopen("
+                "'http://127.0.0.1:8000/health', timeout=3); "
+                "assert r.status == 200"
+            )
+        ],
+        capture_output=True,
+        text=True
+    )
 
-                            if result.returncode == 0:
-                                print("Smoke test passed!", flush=True)
-                                break
+    if result.returncode == 0:
+        print("Smoke test passed!", flush=True)
+        break
 
-                            print(
-                                f"Attempt {attempt}: {result.stderr.strip()}",
-                                flush=True
-                            )
-                            time.sleep(2)
-                        else:
-                            raise SystemExit("Smoke test failed!")
-                    PY
+    print(
+        f"Attempt {attempt}: {result.stderr.strip()}",
+        flush=True
+    )
+    time.sleep(2)
+else:
+    raise SystemExit("Smoke test failed!")
+PY
                 '''
             }
         }
