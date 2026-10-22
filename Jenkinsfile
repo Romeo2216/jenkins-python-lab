@@ -55,7 +55,7 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
+        stage('Run') {
             steps {
                 sh '''
                     docker rm -f ${CONTAINER_NAME} 2>/dev/null || true
@@ -73,24 +73,24 @@ pipeline {
             steps {
                 sh '''
                     .venv/bin/python - <<'PY'
-import time
-import urllib.request
+                    import time
+                    import urllib.request
 
-url = "http://docker-dind:8000/health"
+                    url = "http://docker-dind:8000/health"
 
-for attempt in range(1, 16):
-    try:
-        with urllib.request.urlopen(url, timeout=3) as response:
-            if response.status == 200:
-                print("Application is healthy!")
-                break
-    except Exception as error:
-        print(f"Attempt {attempt}: {error}")
+                    for attempt in range(1, 16):
+                        try:
+                            with urllib.request.urlopen(url, timeout=3) as response:
+                                if response.status == 200:
+                                    print("Application is healthy!")
+                                    break
+                        except Exception as error:
+                            print(f"Attempt {attempt}: {error}")
 
-    time.sleep(2)
-else:
-    raise SystemExit("Health check failed!")
-PY
+                        time.sleep(2)
+                    else:
+                        raise SystemExit("Health check failed!")
+                    PY
                 '''
             }
         }
@@ -123,9 +123,6 @@ PY
                     docker rm ${CONTAINER_NAME} || true
                     docker rmi ${IMAGE_NAME}:${BUILD_NUMBER} || true
                     docker rmi ${IMAGE_NAME}:latest || true
-                    docker system prune -f
-                    docker volume prune -f
-                    docker network prune -f
                 '''
             }
         }
