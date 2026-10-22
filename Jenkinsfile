@@ -148,7 +148,7 @@ PY
             steps {
                 dir('gitops') {
 
-                    // Récupérer le dépôt GitOps
+                    // 1. Récupérer le dépôt GitOps
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: '*/main']],
@@ -158,7 +158,7 @@ PY
                         ]]
                     ])
 
-                    // Modifier le tag et publier le commit
+                    // 2. Récupérer les identifiants GitHub
                     withCredentials([
                         usernamePassword(
                             credentialsId: 'github-gitops-credentials',
@@ -170,62 +170,79 @@ PY
                             set -eu
                             set +x
 
+                            # Vérifier le tag de l'image
                             : "${IMAGE_TAG:?Missing image tag}"
 
                             echo "Updating GitOps to image: ${IMAGE_NAME}:${IMAGE_TAG}"
 
-                            # Sécuriser la valeur utilisée dans le YAML
-                            printf '%s' "$IMAGE_TAG" |
+                            printf '%s\\n' "$IMAGE_TAG" |
                                 grep -Eq '^[0-9a-f]{12}$'
 
+                            # 3. Modifier le tag dans Kustomize
                             FILE="environments/dev/kustomization.yaml"
 
                             test -f "$FILE"
 
-                            # Vérifier qu'une seule entrée newTag existe
                             COUNT=$(grep -Ec '^[[:space:]]*newTag:' "$FILE")
                             test "$COUNT" -eq 1
 
-                            # Mettre à jour le tag
                             sed -i -E \
                                 "s/^([[:space:]]*newTag:).*/\\\\1 \\"${IMAGE_TAG}\\"/" \
                                 "$FILE"
 
-                            # Préparer le commit
+                            echo "Updated Kustomize configuration:"
+                            grep 'newTag:' "$FILE"
+
+                            # 4. Configurer Git
                             git config user.name "Jenkins CI"
                             git config user.email "jenkins@localhost"
 
                             git add "$FILE"
 
-                            # Éviter les commits inutiles
+                            # 5. Éviter les commits inutiles
                             if git diff --cached --quiet; then
                                 echo "GitOps already uses this image."
                                 exit 0
                             fi
 
+                            # 6. Créer le commit
                             git commit -m "ci: deploy ${IMAGE_TAG} to dev"
 
-                            # Authentification Git sans token dans l'URL
+                            # 7. Préparer l'authentification GitHub
                             ASKPASS=$(mktemp)
                             chmod 700 "$ASKPASS"
 
                             trap 'rm -f "$ASKPASS"' EXIT
 
-                            cat > "$ASKPASS" <<'EOF'
-        #!/bin/sh
-        case "$1" in
-        *Username*) printf '%s\\n' "$GITOPS_USERNAME" ;;
-        *Password*) printf '%s\\n' "$GITOPS_TOKEN" ;;
-        *) exit 1 ;;
-        esac
-        EOF
+                            printf '%s\\n' \
+                                '#!/bin/sh' \
+                                'case "$1" in' \
+                                '  *Username*) echo "$GITOPS_USERNAME" ;;' \
+                                '  *Password*) echo "$GITOPS_TOKEN" ;;' \
+                                '  *) exit 1 ;;' \
+                                'esac' > "$ASKPASS"
 
                             export GIT_ASKPASS="$ASKPASS"
                             export GIT_TERMINAL_PROMPT=0
 
+                            # 8. Publier le commit sur GitHub
+                            echo "Pushing GitOps commit to GitHub..."
+
                             git -c credential.helper= push origin HEAD:main
 
-                            echo "GitOps repository updated."
+                            echo "Git push completed."
+
+                            # 9. Vérifier que le dépôt distant est à jour
+                            REMOTE_SHA=$(git -c credential.helper= ls-remote origin refs/heads/main | cut -f1)
+                            LOCAL_SHA=$(git rev-parse HEAD)
+
+                            if [ "$REMOTE_SHA" != "$LOCAL_SHA" ]; then
+                                echo "ERROR: GitOps remote branch was not updated!"
+                                exit 1
+                            fi
+
+                            echo "GitOps repository updated successfully!"
+                            echo "Deployed image: ${IMAGE_NAME}:${IMAGE_TAG}"
                         '''
                     }
                 }
