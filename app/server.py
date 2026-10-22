@@ -17,7 +17,7 @@ class Handler(BaseHTTPRequestHandler):
 
         elif self.path == "/":
             response = {
-                "message": "Hello from Jenkins CI/CD! This is a simple Python web server.",
+                "message": "Deployed automatically with Jenkins and Argo CD!",
                 "result": add(2, 3)
             }
 
