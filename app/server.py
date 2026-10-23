@@ -17,7 +17,7 @@ class Handler(BaseHTTPRequestHandler):
 
         elif self.path == "/":
             response = {
-                "message": "Deployed automatically with Jenkins and Argo CD after tower reboot!",
+                "message": "Deployed automatically with Jenkins and Argo CD and exposed to vnet!",
                 "result": add(2, 3)
             }
 
