@@ -1,9 +1,13 @@
 import json
 import os
+from pathlib import Path
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from app.calculator import add
+
+
+APP_DIR = Path(__file__).parent
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -18,28 +22,19 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps(response).encode("utf-8")
 
         elif self.path == "/":
+            content_type = "text/html; charset=utf-8"
+            body = (APP_DIR / "ui" / "index.html").read_bytes()
+
+        elif self.path == "/home":
+            content_type = "text/html; charset=utf-8"
+            body = (APP_DIR / "ui" / "home.html").read_bytes()
+
+        elif self.path == "/calculate":
             response = {
-                "message": "Deployed automatically with Jenkins and Argo CD and exposed to vnet!",
                 "result": add(2, 3)
             }
             content_type = "application/json"
             body = json.dumps(response).encode("utf-8")
-
-        elif self.path == "/home":
-            content_type = "text/html; charset=utf-8"
-            body = b"""<!doctype html>
-                    <html lang="fr">
-                    <head>
-                        <meta charset="utf-8">
-                        <meta name="viewport" content="width=device-width, initial-scale=1">
-                        <title>Jenkins Python Lab</title>
-                    </head>
-                    <body>
-                        <h1>Bienvenue</h1>
-                        <p>La page web est servie par Python.</p>
-                    </body>
-                    </html>
-                    """
 
         else:
             self.send_error(404)

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Jenkins Python Lab</title>
+  </head>
+  <body>
+    <h1>Calculatrice</h1>
+
+    <button id="calculate">Calculer 2 + 3</button>
+    <p id="result"></p>
+
+    <script>
+      document
+        .getElementById("calculate")
+        .addEventListener("click", async () => {
+          const response = await fetch("/calculate");
+          const data = await response.json();
+
+          document.getElementById("result").textContent =
+            `Résultat : ${data.result}`;
+        });
+    </script>
+  </body>
+</html>
